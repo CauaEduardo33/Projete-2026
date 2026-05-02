@@ -1,12 +1,14 @@
 const ee = require('@google/earthengine');
 const express = require('express');
-const privateKey = require('./credentials.json');
-const port = process.env.PORT || 3000;
+const { GoogleAuth } = require('google-auth-library');
+const path = require('path');
+const os = require('os');
 
+const port = process.env.PORT || 3000;
 const app = express(); // Criamos o app separado
 app.use(express.json()); // Middleware para parsear JSON, se necessário
 
-
+const adcPath = path.join(os.homedir(), 'AppData', 'Roaming', 'gcloud', 'application_default_credentials.json');
 
 function maskedcloudsImage(image) {
     var qa = image.select('QA60');
@@ -17,59 +19,79 @@ function maskedcloudsImage(image) {
     return image.updateMask(mask).divide(10000);
 }
 
-console.log('Authenticating Earth Engine API...');
+async function initializeEE(startDate) {
+    console.log('Initialzing Earth Engine API...');
+    try {
+        const auth = new GoogleAuth({
+            keyFilename: adcPath,
+            scopes: ['https://googleapis.com']
+        });
 
-ee.data.authenticateViaPrivateKey(privateKey, () => {
-    ee.initialize(null, null, () => {
-        console.log('Earth Engine initialized.');
+        const client = await auth.getClient();
+        const tokens = await client.getAccessToken();
 
-        
+        ee.data.setAuthToken(null, 'Bearer', tokens.token, 3600, [], () => {
+            ee.initialize(null, null, () => {
+                console.log('Earth Engine initialized.');
+                startServer(startDate);
+            }, (err) => console.error('Initialization error:', err), null, '317376484133');
+        }, false);
+    } catch (err) {
+        console.error('Erro ao carregar credenciais locais:', err.message);
+        console.log('Dica: rode "gcloud auth application-default login" novamente.');
+    }
+}
 
-        // ROTA  NDVI 
-        app.post('/ndvi', (req, res) => { 
-            const plantationCords = req.body.plantationCords; // Esperamos receber as coordenadas no corpo da requisição
-            const plantation = ee.Geometry.Polygon([plantationCords]);
-            const s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED");
+function startServer(dataInicio) {
+    // ROTA  NDVI 
+    app.post('/ndvi', (req, res) => { 
+        const plantationCords = req.body.plantationCords; // Esperamos receber as coordenadas no corpo da requisição
+        const plantation = ee.Geometry.Polygon([plantationCords]);
+        const s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED");
+        const hoje = new Date().toISOString().split('T')[0]; // Data atual no formato YYYY-MM-DD
+        const dataInicio = req.body.dataInicio || new Date(Date.now()-10*60*60*1000).toISOString().split('T')[0]; // Se dataInicio não for fornecida, usa a data atual
+         
+        // pega a imagem, aplica o filtro de nuvens, calcula o NDVI e depois a média do NDVI para a plantação
+        const image = s2.filterBounds(plantation)
+            .filterDate(dataInicio, hoje)
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 50))
+            .map(maskedcloudsImage)
+            .median()
+            .clip(plantation);
 
-            const image = s2.filterBounds(plantation)
-                .filterDate("2024-05-01", "2026-01-01")
-                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 50))
-                .map(maskedcloudsImage)
-                .median()
-                .clip(plantation);
+        const ndvimap = image.normalizedDifference(['B8', 'B4']);
 
-            const ndvimap = image.normalizedDifference(['B8', 'B4']);
+        const ndviMean = ndvimap.reduceRegion({
+            reducer: ee.Reducer.mean(),
+            geometry: plantation, // Importante adicionar a geometria aqui também
+            scale: 10,
+            maxPixels: 1e9
+        });
 
-            const ndviMean = ndvimap.reduceRegion({
-                reducer: ee.Reducer.mean(),
-                geometry: plantation, // Importante adicionar a geometria aqui também
-                scale: 10,
-                maxPixels: 1e9
-            });
+        ndviMean.evaluate((result, error) => {
+            if (error) return res.status(500).send(error);
 
-            ndviMean.evaluate((result, error) => {
-                if (error) return res.status(500).send(error);
+            const ndviFinal = result.nd; // Guardamos o valor aqui
 
-                const ndviFinal = result.nd; // Guardamos o valor aqui
+            const visParams = { min: 0, max: 1, palette: ['red', 'yellow', 'green'] };
 
-                const visParams = { min: 0, max: 1, palette: ['red', 'yellow', 'green'] };
+            ndvimap.getMapId(visParams, (mapObj,errorMap) => {
 
-                ndvimap.getMapId(visParams, (mapObj,errorMap) => {
-
-                  if (errorMap) return res.status(500).send(errorMap);
-                    res.json({
-                        mediaNdvi: ndviFinal,
-                        urlMapa: mapObj.urlFormat,
-                        mapid: mapObj.mapid
-                    });
+              if (errorMap) return res.status(500).send(errorMap);
+                res.json({
+                    mediaNdvi: ndviFinal,
+                    urlMapa: mapObj.urlFormat,
+                    mapid: mapObj.mapid
                 });
             });
         });
+    });
 
-        // Só ligamos o servidor APÓS a rota ser definida
-        app.listen(port, () => {
-            console.log(`Server listening on port ${port}`);
-        });
+    // Só ligamos o servidor APÓS a rota ser definida
+    app.listen(port, () => {
+        console.log(`Server listening on port ${port}`);
+    });
+    
+}
 
-    }, (err) => console.error('Initialization error:', err));
-}, (err) => console.error('Authentication error:', err));
+initializeEE();
