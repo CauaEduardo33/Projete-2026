@@ -19,7 +19,7 @@ function maskedcloudsImage(image) {
     return image.updateMask(mask).divide(10000);
 }
 
-async function initializeEE(startDate) {
+async function initializeEE() {
     console.log('Initialzing Earth Engine API...');
     try {
         const auth = new GoogleAuth({
@@ -33,7 +33,7 @@ async function initializeEE(startDate) {
         ee.data.setAuthToken(null, 'Bearer', tokens.token, 3600, [], () => {
             ee.initialize(null, null, () => {
                 console.log('Earth Engine initialized.');
-                startServer(startDate);
+                startServer();
             }, (err) => console.error('Initialization error:', err), null, '317376484133');
         }, false);
     } catch (err) {
@@ -42,7 +42,7 @@ async function initializeEE(startDate) {
     }
 }
 
-function startServer(dataInicio) {
+function startServer() {
     // ROTA  NDVI 
     app.post('/ndvi', (req, res) => { 
         const plantationCords = req.body.plantationCords; // Esperamos receber as coordenadas no corpo da requisição
@@ -69,7 +69,11 @@ function startServer(dataInicio) {
         });
 
         ndviMean.evaluate((result, error) => {
-            if (error) return res.status(500).send(error);
+           if(error){ console.error('ERRO NO EARTH ENGINE:', error);
+            return res.status(500).json({ 
+            erro: "Falha no Earth Engine", 
+            detalhes: error.message || error 
+        });}
 
             const ndviFinal = result.nd; // Guardamos o valor aqui
 
