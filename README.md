@@ -8,7 +8,6 @@ Aqui está o guia completo para quem vai receber e rodar os códigos presentes e
 A pessoa deve instalar o **Node.js** e o **Google Cloud CLI (gcloud)**. Após isso, no terminal, dentro da pasta do projeto, ela deve rodar o comando para instalar as bibliotecas:
 
 ```cmd
-npm init -y
 npm install 
 ```
 
