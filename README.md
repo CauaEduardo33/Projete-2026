@@ -17,8 +17,6 @@ Como o `APIHandle.js` usa o Earth Engine, a pessoa precisa autorizar a máquina 
 
 1.  No CMD, digite: `gcloud auth application-default login`
 2.  Faça login com a conta Google que tem acesso ao Earth Engine.
-3.  **Ajuste no Código:** A pessoa deve abrir o `APIHandle.js` e substituir o ID `'317376484133'` pelo ID do projeto Google Cloud dela.
-
 ---
 
 ## 3. Como chamar o `Clima.js`
